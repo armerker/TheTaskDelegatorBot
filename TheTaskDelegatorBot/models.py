@@ -5,6 +5,7 @@ from typing import Optional
 
 @dataclass
 class TaskModel:
+    """Модель задачи"""
     id: int
     title: str
     description: Optional[str]
@@ -15,11 +16,13 @@ class TaskModel:
 
     @property
     def status(self) -> str:
+        """Возвращает статус задачи"""
         return "✅ Выполнено" if self.completed else "⏳ Ожидает"
 
 
 @dataclass
 class UserModel:
+    """Модель пользователя"""
     id: int
     telegram_id: int
     username: Optional[str]

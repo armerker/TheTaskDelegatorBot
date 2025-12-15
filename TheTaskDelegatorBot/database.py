@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
+DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./tasks.db")
 
 engine = create_engine(DATABASE_URL,
                        connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
@@ -52,13 +52,14 @@ class Task(Base):
     assigned_to = relationship("User", foreign_keys=[assigned_to_id], back_populates="tasks_received")
 
 
-def init_db():
+def init_db() -> None:
+    """Инициализирует базу данных"""
     Base.metadata.create_all(bind=engine)
 
     try:
         with engine.connect() as conn:
             result = conn.execute(text("PRAGMA table_info(users)"))
-            columns = [row[1] for row in result]
+            columns: list[str] = [row[1] for row in result]
 
             if 'tasks_created_count' not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN tasks_created_count INTEGER DEFAULT 0"))
@@ -78,6 +79,7 @@ def init_db():
 
 
 def get_db():
+    """Создает сессию базы данных"""
     db = SessionLocal()
     try:
         yield db

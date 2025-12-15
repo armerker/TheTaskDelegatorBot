@@ -11,12 +11,11 @@ logging.basicConfig(level=logging.INFO)
 bot_instance = None
 
 
-async def main():
+async def main() -> None:
     global bot_instance
 
     print("🚀 Запуск бота...")
 
-    # Инициализируем базу данных
     print("📊 Инициализация базы данных...")
     init_db()
     print("✅ База данных готова")
@@ -27,7 +26,6 @@ async def main():
     # Импортируем главный роутер
     from handlers import main_router
 
-    # Подключаем главный роутер
     dp.include_router(main_router)
 
     print("✅ Все роутеры подключены")

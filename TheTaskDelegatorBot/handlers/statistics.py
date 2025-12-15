@@ -7,7 +7,7 @@ router = Router()
 
 
 @router.message(F.text == "📊 Статистика")
-async def get_user_statistics(message: Message):
+async def get_user_statistics(message: Message) -> None:
     """Отображает статистику пользователя"""
     db = next(get_db())
     from database import User, Task
@@ -27,35 +27,34 @@ async def get_user_statistics(message: Message):
         await message.answer("❌ Ошибка: собеседник не найден")
         return
 
-    # Получаем данные с безопасным доступом к атрибутам
-    user_created = getattr(user, 'tasks_created_count', 0)
-    user_completed = getattr(user, 'tasks_completed_count', 0)
-    user_received = getattr(user, 'tasks_received_count', 0)
-    user_deleted = getattr(user, 'tasks_deleted_count', 0)
 
-    partner_created = getattr(partner, 'tasks_created_count', 0)
-    partner_completed = getattr(partner, 'tasks_completed_count', 0)
-    partner_received = getattr(partner, 'tasks_received_count', 0)
-    partner_deleted = getattr(partner, 'tasks_deleted_count', 0)
+    user_created: int = getattr(user, 'tasks_created_count', 0)
+    user_completed: int = getattr(user, 'tasks_completed_count', 0)
+    user_received: int = getattr(user, 'tasks_received_count', 0)
+    user_deleted: int = getattr(user, 'tasks_deleted_count', 0)
 
-    # Выполненные задачи (из базы данных)
-    completed_tasks = db.query(Task).filter(
+    partner_created: int = getattr(partner, 'tasks_created_count', 0)
+    partner_completed: int = getattr(partner, 'tasks_completed_count', 0)
+    partner_received: int = getattr(partner, 'tasks_received_count', 0)
+    partner_deleted: int = getattr(partner, 'tasks_deleted_count', 0)
+
+    completed_tasks: int = db.query(Task).filter(
         Task.assigned_to_id == user.id,
         Task.completed == True
     ).count()
 
-    pending_tasks = db.query(Task).filter(
+    pending_tasks: int = db.query(Task).filter(
         Task.assigned_to_id == user.id,
         Task.completed == False
     ).count()
 
     # Расчет процента выполнения
-    completion_rate = 0
+    completion_rate: float = 0
     if user_received > 0:
         completion_rate = (user_completed / user_received) * 100
 
     # Статистика пользователя
-    stats_text = f"📊 <b>ВАША СТАТИСТИКА</b>\n\n"
+    stats_text: str = f"📊 <b>ВАША СТАТИСТИКА</b>\n\n"
     stats_text += f"👤 <b>Пользователь:</b> {user.full_name or 'Аноним'}\n\n"
 
     stats_text += f"📈 <b>МОЯ СТАТИСТИКА:</b>\n"
@@ -67,7 +66,7 @@ async def get_user_statistics(message: Message):
     stats_text += f"• Задач в ожидании: <b>{pending_tasks}</b>\n\n"
 
     # Статистика собеседника
-    partner_completion_rate = 0
+    partner_completion_rate: float = 0
     if partner_received > 0:
         partner_completion_rate = (partner_completed / partner_received) * 100
 
@@ -78,10 +77,10 @@ async def get_user_statistics(message: Message):
     stats_text += f"• Удалил задач: <b>{partner_deleted}</b>\n"
     stats_text += f"• Процент выполнения: <b>{partner_completion_rate:.1f}%</b>\n\n"
 
-    # Общая статистика
-    total_tasks_created = user_created + partner_created
-    total_tasks_completed = user_completed + partner_completed
-    total_completion_rate = 0
+
+    total_tasks_created: int = user_created + partner_created
+    total_tasks_completed: int = user_completed + partner_completed
+    total_completion_rate: float = 0
     if (user_received + partner_received) > 0:
         total_completion_rate = (total_tasks_completed / (user_received + partner_received)) * 100
 

@@ -6,7 +6,7 @@ router = Router()
 
 
 @router.message(Command("help"))
-async def help_command(message: Message):
+async def help_command(message: Message) -> None:
     """Справка по боту"""
     help_text = (
         "🤖 <b>TaskBuddy - бот для обмена задачами</b>\n\n"
@@ -31,7 +31,7 @@ async def help_command(message: Message):
 
 
 @router.callback_query(F.data == "cancel_action")
-async def cancel_action_callback(callback: CallbackQuery):
+async def cancel_action_callback(callback: CallbackQuery) -> None:
     """Отмена действия"""
     await callback.message.answer("❌ Действие отменено")
     await callback.answer()

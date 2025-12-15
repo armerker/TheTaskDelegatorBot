@@ -4,7 +4,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.orm import Session
 import keyboards as kb
-import utils
 from database import get_db
 from datetime import datetime
 
@@ -16,7 +15,7 @@ class TaskStates(StatesGroup):
     waiting_for_description = State()
 
 
-async def send_notification(user_id: int, text: str):
+async def send_notification(user_id: int, text: str) -> bool:
     """Отправляет уведомление пользователю"""
     try:
         from bot import bot_instance as bot
@@ -27,12 +26,10 @@ async def send_notification(user_id: int, text: str):
         return False
 
 
-# === СОЗДАНИЕ ЗАДАЧИ ===
-
 @router.message(F.text == "📝 Создать задание")
-async def create_task_start(message: Message, state: FSMContext):
+async def create_task_start(message: Message, state: FSMContext) -> None:
     """Начать создание задачи"""
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import User
 
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -52,7 +49,7 @@ async def create_task_start(message: Message, state: FSMContext):
 
 
 @router.message(TaskStates.waiting_for_title)
-async def process_task_title(message: Message, state: FSMContext):
+async def process_task_title(message: Message, state: FSMContext) -> None:
     """Обработать название задачи"""
     if message.text == "❌ Отмена":
         await state.clear()
@@ -82,7 +79,7 @@ async def process_task_title(message: Message, state: FSMContext):
 
 
 @router.message(TaskStates.waiting_for_description)
-async def process_task_description(message: Message, state: FSMContext):
+async def process_task_description(message: Message, state: FSMContext) -> None:
     """Обработать описание задачи"""
     if message.text == "❌ Отмена":
         await state.clear()
@@ -92,10 +89,10 @@ async def process_task_description(message: Message, state: FSMContext):
         )
         return
 
-    data = await state.get_data()
-    description = None if message.text == "⏭️ Пропустить" else message.text
+    data: dict = await state.get_data()
+    description: str | None = None if message.text == "⏭️ Пропустить" else message.text
 
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import User, Task
 
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -117,21 +114,20 @@ async def process_task_description(message: Message, state: FSMContext):
 
     db.add(task)
 
-    # УВЕЛИЧИВАЕМ СТАТИСТИКУ
+
     try:
         user.tasks_created_count += 1
         partner.tasks_received_count += 1
     except:
-        # Если колонки еще не существуют, игнорируем
         pass
 
     db.commit()
     await state.clear()
 
-    # Формируем уведомление для собеседника
-    user_name = message.from_user.full_name or f"@{message.from_user.username}" if message.from_user.username else "Собеседник"
 
-    notification_text = (
+    user_name: str = message.from_user.full_name or f"@{message.from_user.username}" if message.from_user.username else "Собеседник"
+
+    notification_text: str = (
         f"📬 <b>НОВАЯ ЗАДАЧА!</b>\n\n"
         f"<b>{user_name}</b> назначил(а) вам задачу:\n\n"
         f"📌 <b>{data['title']}</b>\n"
@@ -145,8 +141,7 @@ async def process_task_description(message: Message, state: FSMContext):
     # Отправляем уведомление собеседнику
     await send_notification(partner.telegram_id, notification_text)
 
-    # ✅ СООБЩЕНИЕ СОЗДАТЕЛЮ о создании задачи
-    creation_message = f"✅ Задача <b>'{data['title']}'</b> создана и отправлена собеседнику!"
+    creation_message: str = f"✅ Задача <b>'{data['title']}'</b> создана и отправлена собеседнику!"
     if description:
         creation_message += f"\n📝 Описание: {description}"
 
@@ -159,12 +154,10 @@ async def process_task_description(message: Message, state: FSMContext):
     )
 
 
-# === УДАЛЕНИЕ ЗАДАЧИ ===
-
 @router.message(F.text == "🗑️ Удалить задачу")
-async def delete_task_menu(message: Message):
+async def delete_task_menu(message: Message) -> None:
     """Показать меню удаления задач"""
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import User, Task
 
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -177,7 +170,7 @@ async def delete_task_menu(message: Message):
         return
 
     # ПОКАЗЫВАЕМ ТОЛЬКО НЕВЫПОЛНЕННЫЕ ЗАДАЧИ
-    tasks = db.query(Task).filter(
+    tasks: list[Task] = db.query(Task).filter(
         Task.assigned_by_id == user.id,
         Task.completed == False
     ).all()
@@ -193,25 +186,22 @@ async def delete_task_menu(message: Message):
 
 
 @router.callback_query(F.data.startswith("delete_task:"))
-async def delete_task_callback(callback: CallbackQuery):
+async def delete_task_callback(callback: CallbackQuery) -> None:
     """Удалить задачу"""
-    task_id = int(callback.data.split(":")[1])
+    task_id: int = int(callback.data.split(":")[1])
 
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import Task, User
 
     task = db.query(Task).filter(Task.id == task_id).first()
 
     if task:
-        task_title = task.title
+        task_title: str = task.title
 
-        # Получаем информацию о собеседнике
         partner = db.query(User).filter(User.id == task.assigned_to_id).first()
 
-        # Удаляем задачу
         db.delete(task)
 
-        # УВЕЛИЧИВАЕМ СТАТИСТИКУ УДАЛЕНИЯ
         try:
             creator = db.query(User).filter(User.id == task.assigned_by_id).first()
             if creator:
@@ -223,9 +213,9 @@ async def delete_task_callback(callback: CallbackQuery):
 
         # Уведомляем собеседника об удалении задачи
         if partner:
-            user_name = callback.from_user.full_name or f"@{callback.from_user.username}" if callback.from_user.username else "Собеседник"
+            user_name: str = callback.from_user.full_name or f"@{callback.from_user.username}" if callback.from_user.username else "Собеседник"
 
-            delete_notification = (
+            delete_notification: str = (
                 f"🗑️ <b>ЗАДАЧА УДАЛЕНА</b>\n\n"
                 f"<b>{user_name}</b> удалил(а) задачу:\n"
                 f"📌 {task_title}"
@@ -233,7 +223,7 @@ async def delete_task_callback(callback: CallbackQuery):
 
             await send_notification(partner.telegram_id, delete_notification)
 
-        # ✅ СООБЩЕНИЕ ОБ УДАЛЕНИИ
+
         await callback.message.answer(
             f"🗑️ Задача <b>'{task_title}'</b> удалена!",
             parse_mode="HTML"
@@ -250,12 +240,10 @@ async def delete_task_callback(callback: CallbackQuery):
     await callback.answer()
 
 
-# === ВЫПОЛНЕНИЕ ЗАДАЧИ ===
-
 @router.message(F.text == "✅ Выполнил задачу")
-async def complete_task_menu(message: Message):
+async def complete_task_menu(message: Message) -> None:
     """Показать меню выполнения задач"""
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import User, Task
 
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -267,8 +255,7 @@ async def complete_task_menu(message: Message):
         )
         return
 
-    # ПОКАЗЫВАЕМ ТОЛЬКО НЕВЫПОЛНЕННЫЕ ЗАДАЧИ
-    tasks = db.query(Task).filter(
+    tasks: list[Task] = db.query(Task).filter(
         Task.assigned_to_id == user.id,
         Task.completed == False
     ).all()
@@ -284,24 +271,22 @@ async def complete_task_menu(message: Message):
 
 
 @router.callback_query(F.data.startswith("complete_task:"))
-async def complete_task_callback(callback: CallbackQuery):
+async def complete_task_callback(callback: CallbackQuery) -> None:
     """Отметить задачу как выполненную"""
-    task_id = int(callback.data.split(":")[1])
+    task_id: int = int(callback.data.split(":")[1])
 
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import Task, User
 
     task = db.query(Task).filter(Task.id == task_id).first()
 
     if task:
-        task_title = task.title
+        task_title: str = task.title
         task.completed = True
         task.completed_at = datetime.utcnow()
 
-        # Получаем информацию о создателе задачи
         creator = db.query(User).filter(User.id == task.assigned_by_id).first()
 
-        # УВЕЛИЧИВАЕМ СТАТИСТИКУ ВЫПОЛНЕНИЯ
         try:
             executor = db.query(User).filter(User.id == task.assigned_to_id).first()
             if executor:
@@ -313,9 +298,9 @@ async def complete_task_callback(callback: CallbackQuery):
 
         # Уведомляем создателя задачи о выполнении
         if creator:
-            user_name = callback.from_user.full_name or f"@{callback.from_user.username}" if callback.from_user.username else "Собеседник"
+            user_name: str = callback.from_user.full_name or f"@{callback.from_user.username}" if callback.from_user.username else "Собеседник"
 
-            completion_notification = (
+            completion_notification: str = (
                 f"✅ <b>ЗАДАЧА ВЫПОЛНЕНА!</b>\n\n"
                 f"<b>{user_name}</b> выполнил(а) вашу задачу:\n\n"
                 f"📌 <b>{task_title}</b>\n"
@@ -324,7 +309,6 @@ async def complete_task_callback(callback: CallbackQuery):
 
             await send_notification(creator.telegram_id, completion_notification)
 
-        # ✅ СООБЩЕНИЕ О ВЫПОЛНЕНИИ
         await callback.message.answer(
             f"✅ Задача <b>'{task_title}'</b> выполнена!\n"
             f"⏰ {task.completed_at.strftime('%d.%m.%Y %H:%M')}",
@@ -342,12 +326,10 @@ async def complete_task_callback(callback: CallbackQuery):
     await callback.answer()
 
 
-# === ПРОСМОТР ЗАДАЧ ===
-
 @router.message(F.text == "📋 Мои задачи")
-async def view_tasks(message: Message):
+async def view_tasks(message: Message) -> None:
     """Показать все задачи"""
-    db = next(get_db())
+    db: Session = next(get_db())
     from database import User, Task
 
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
@@ -364,27 +346,26 @@ async def view_tasks(message: Message):
         return
 
     # Получаем информацию о собеседнике
-    partner_name = "нет"
-    partner_stats = ""
+    partner_name: str = "нет"
+    partner_stats: str = ""
     if user.partner_id:
         partner = db.query(User).filter(User.id == user.partner_id).first()
         if partner:
             partner_name = partner.full_name or f"@{partner.username}" if partner.username else "Собеседник"
 
 
-    # ЗАДАЧИ КОТОРЫЕ Я НАЗНАЧИЛ (мои задачи для собеседника)
-    my_tasks = db.query(Task).filter(
+    my_tasks: list[Task] = db.query(Task).filter(
         Task.assigned_by_id == user.id,
         Task.completed == False
     ).all()
 
     # ЗАДАЧИ КОТОРЫЕ МНЕ НАЗНАЧИЛИ (задачи от собеседника для меня)
-    tasks_for_me = db.query(Task).filter(
+    tasks_for_me: list[Task] = db.query(Task).filter(
         Task.assigned_to_id == user.id,
         Task.completed == False
     ).all()
 
-    response = f"📊 <b>ОБЗОР ЗАДАЧ</b>\n\n"
+    response: str = f"📊 <b>ОБЗОР ЗАДАЧ</b>\n\n"
 
     if user.partner_id:
         response += f"👤 <b>Собеседник:</b> {partner_name}\n\n"
@@ -392,7 +373,6 @@ async def view_tasks(message: Message):
     # СТАТИСТИКА СОБЕСЕДНИКА
     response += partner_stats
 
-    # РАЗДЕЛ 1: МОИ ЗАДАЧИ ДЛЯ СОБЕСЕДНИКА
     response += f"📤 <b>Мои задачи для {partner_name}:</b>\n"
     if my_tasks:
         for i, task in enumerate(my_tasks, 1):
@@ -403,7 +383,6 @@ async def view_tasks(message: Message):
     else:
         response += "📭 Нет задач\n\n"
 
-    # РАЗДЕЛ 2: ЗАДАЧИ ОТ СОБЕСЕДНИКА ДЛЯ МЕНЯ
     response += f"📥 <b>Задачи от {partner_name} для меня:</b>\n"
     if tasks_for_me:
         for i, task in enumerate(tasks_for_me, 1):
@@ -414,7 +393,6 @@ async def view_tasks(message: Message):
     else:
         response += "📭 Нет задач\n\n"
 
-    # АКТИВНЫЕ ЗАДАЧИ
     response += f"📊 <b>Активные задачи:</b>\n"
     response += f"• Мои задачи: {len(my_tasks)}\n"
     response += f"• Задачи для меня: {len(tasks_for_me)}\n"
