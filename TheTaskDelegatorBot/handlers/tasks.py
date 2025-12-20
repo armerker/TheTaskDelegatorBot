@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session
 import keyboards as kb
 from database import get_db
 from datetime import datetime
+import logging
+import utils
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 class TaskStates(StatesGroup):
@@ -18,11 +21,17 @@ class TaskStates(StatesGroup):
 async def send_notification(user_id: int, text: str) -> bool:
     """Отправляет уведомление пользователю"""
     try:
-        from bot import bot_instance as bot
-        result = await bot.send_message(user_id, text, parse_mode="HTML")
+        from aiogram import Bot
+        import config
+
+        bot = Bot(token=config.config.BOT_TOKEN)
+        await bot.send_message(user_id, text, parse_mode="HTML")
+        await bot.session.close()
+
+        logger.info(f"✅ Telegram уведомление отправлено пользователю {user_id}")
         return True
     except Exception as e:
-        print(f"❌ Ошибка отправки уведомления пользователю {user_id}: {type(e).__name__}: {e}")
+        logger.error(f"❌ Ошибка отправки Telegram уведомления пользователю {user_id}: {e}")
         return False
 
 
@@ -31,6 +40,9 @@ async def create_task_start(message: Message, state: FSMContext) -> None:
     """Начать создание задачи"""
     db: Session = next(get_db())
     from database import User
+
+    # Обновляем активность
+    utils.update_user_activity(db, message.from_user.id)
 
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
 
@@ -95,6 +107,9 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
     db: Session = next(get_db())
     from database import User, Task
 
+    # Обновляем активность
+    utils.update_user_activity(db, message.from_user.id)
+
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
     partner = db.query(User).filter(User.id == user.partner_id).first()
 
@@ -114,7 +129,6 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
 
     db.add(task)
 
-
     try:
         user.tasks_created_count += 1
         partner.tasks_received_count += 1
@@ -124,6 +138,8 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
     db.commit()
     await state.clear()
 
+    # Обновляем общую статистику
+    utils.update_app_stats(db)
 
     user_name: str = message.from_user.full_name or f"@{message.from_user.username}" if message.from_user.username else "Собеседник"
 
@@ -138,8 +154,123 @@ async def process_task_description(message: Message, state: FSMContext) -> None:
 
     notification_text += f"\n⏰ {datetime.utcnow().strftime('%d.%m.%Y %H:%M')}"
 
-    # Отправляем уведомление собеседнику
+    # Отправляем уведомление собеседнику в Telegram
     await send_notification(partner.telegram_id, notification_text)
+
+    # 🎯 ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ЧЕРЕЗ ONESIGNAL API
+    try:
+        import onesignal_api
+        if onesignal_api.onesignal_api.is_configured:
+            onesignal_result = onesignal_api.onesignal_api.send_task_notification(
+                task_title=data['title'],
+                from_user=user_name,
+                task_description=description,
+                task_id=task.id,
+                priority_level="normal"
+            )
+
+            if onesignal_result['success']:
+                logger.info("✅ OneSignal уведомление отправлено успешно")
+                # Увеличиваем счетчик OneSignal статистики
+                utils.increment_onesignal_stats(db, message.from_user.id, sent=True)
+            else:
+                logger.warning(f"⚠️ OneSignal уведомление не отправлено: {onesignal_result.get('error')}")
+    except ImportError:
+        logger.warning("OneSignal API не установлен")
+    except Exception as e:
+        logger.error(f"Ошибка отправки OneSignal уведомления: {e}")
+
+    creation_message: str = f"✅ Задача <b>'{data['title']}'</b> создана и отправлена собеседнику!"
+    if description:
+        creation_message += f"\n📝 Описание: {description}"
+
+    await message.answer(creation_message, parse_mode="HTML")
+
+    # Возвращаем в главное меню
+    await message.answer(
+        "Выберите действие:",
+        reply_markup=kb.get_main_menu_keyboard(has_partner=True)
+    )
+@router.message(TaskStates.waiting_for_description)
+async def process_task_description(message: Message, state: FSMContext) -> None:
+    """Обработать описание задачи"""
+    if message.text == "❌ Отмена":
+        await state.clear()
+        await message.answer(
+            "❌ Создание задачи отменено",
+            reply_markup=kb.get_main_menu_keyboard(has_partner=True)
+        )
+        return
+
+    data: dict = await state.get_data()
+    description: str | None = None if message.text == "⏭️ Пропустить" else message.text
+
+    db: Session = next(get_db())
+    from database import User, Task
+
+    user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+    partner = db.query(User).filter(User.id == user.partner_id).first()
+
+    if not partner:
+        await message.answer("❌ Ошибка: собеседник не найден")
+        await state.clear()
+        return
+
+    # Создаем задачу
+    task = Task(
+        title=data['title'],
+        description=description,
+        assigned_by_id=user.id,
+        assigned_to_id=partner.id,
+        created_at=datetime.utcnow()
+    )
+
+    db.add(task)
+
+    try:
+        user.tasks_created_count += 1
+        partner.tasks_received_count += 1
+    except:
+        pass
+
+    db.commit()
+    await state.clear()
+
+    user_name: str = message.from_user.full_name or f"@{message.from_user.username}" if message.from_user.username else "Собеседник"
+
+    notification_text: str = (
+        f"📬 <b>НОВАЯ ЗАДАЧА!</b>\n\n"
+        f"<b>{user_name}</b> назначил(а) вам задачу:\n\n"
+        f"📌 <b>{data['title']}</b>\n"
+    )
+
+    if description:
+        notification_text += f"📝 {description}\n"
+
+    notification_text += f"\n⏰ {datetime.utcnow().strftime('%d.%m.%Y %H:%M')}"
+
+    # Отправляем уведомление собеседнику в Telegram
+    await send_notification(partner.telegram_id, notification_text)
+
+    # 🎯 ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ЧЕРЕЗ ONESIGNAL API
+    try:
+        import onesignal_api
+        if onesignal_api.onesignal_api.is_configured:
+            onesignal_result = onesignal_api.onesignal_api.send_task_notification(
+                task_title=data['title'],
+                from_user=user_name,
+                task_description=description,
+                task_id=task.id
+            )
+
+            if onesignal_result['success']:
+                logger.info(f"OneSignal уведомление отправлено для задачи {task.id}")
+            else:
+                logger.warning(f"OneSignal уведомление не отправлено: {onesignal_result.get('error')}")
+    except ImportError:
+        logger.warning("OneSignal API не установлен")
+    except Exception as e:
+        logger.error(f"Ошибка отправки OneSignal уведомления: {e}")
 
     creation_message: str = f"✅ Задача <b>'{data['title']}'</b> создана и отправлена собеседнику!"
     if description:
@@ -222,7 +353,6 @@ async def delete_task_callback(callback: CallbackQuery) -> None:
             )
 
             await send_notification(partner.telegram_id, delete_notification)
-
 
         await callback.message.answer(
             f"🗑️ Задача <b>'{task_title}'</b> удалена!",
@@ -347,12 +477,10 @@ async def view_tasks(message: Message) -> None:
 
     # Получаем информацию о собеседнике
     partner_name: str = "нет"
-    partner_stats: str = ""
     if user.partner_id:
         partner = db.query(User).filter(User.id == user.partner_id).first()
         if partner:
             partner_name = partner.full_name or f"@{partner.username}" if partner.username else "Собеседник"
-
 
     my_tasks: list[Task] = db.query(Task).filter(
         Task.assigned_by_id == user.id,
@@ -369,9 +497,6 @@ async def view_tasks(message: Message) -> None:
 
     if user.partner_id:
         response += f"👤 <b>Собеседник:</b> {partner_name}\n\n"
-
-    # СТАТИСТИКА СОБЕСЕДНИКА
-    response += partner_stats
 
     response += f"📤 <b>Мои задачи для {partner_name}:</b>\n"
     if my_tasks:

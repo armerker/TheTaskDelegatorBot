@@ -27,8 +27,4 @@ venv.bak/
 
 # Secrets
 config.py
-secrets.py
-token.txt
-
-# Logs
-*.log
+se

@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.orm import Session
@@ -14,13 +14,26 @@ router = Router()
 async def send_notification(user_id: int, text: str) -> bool:
     """Отправляет уведомление пользователю"""
     try:
-        from bot import bot_instance as bot
-        print(f"🔄 Попытка отправить уведомление пользователю {user_id}")
-        result = await bot.send_message(user_id, text, parse_mode="HTML")
+        # 🔧 Получаем бота через функцию
+        from bot import get_bot
+        bot = get_bot()
+
+        if bot is None:
+            print(f"⚠️ Bot is None for user {user_id}. Creating temporary bot...")
+            # Создаем временный экземпляр бота
+            from aiogram import Bot
+            import config
+            temp_bot = Bot(token=config.config.BOT_TOKEN)
+            await temp_bot.send_message(user_id, text, parse_mode="HTML")
+            await temp_bot.session.close()
+            print(f"✅ Уведомление отправлено пользователю {user_id}")
+            return True
+
+        await bot.send_message(user_id, text, parse_mode="HTML")
         print(f"✅ Уведомление отправлено пользователю {user_id}")
         return True
     except Exception as e:
-        print(f"❌ Ошибка отправки уведомления пользователю {user_id}: {type(e).__name__}: {e}")
+        print(f"❌ Ошибка отправки уведомления пользователю {user_id}: {e}")
         return False
 
 
@@ -40,7 +53,6 @@ async def create_invite_code(message: Message) -> None:
         await message.answer("✅ У вас уже есть собеседник!")
         return
 
-
     invite_code, expires_at = utils.create_invite(db, message.from_user.id)
 
     if not invite_code:
@@ -48,7 +60,6 @@ async def create_invite_code(message: Message) -> None:
         return
 
     expires_str: str = expires_at.strftime("%d.%m.%Y %H:%M")
-
 
     await message.answer(
         f"🎉 <b>Ваш код приглашения создан!</b>\n\n"
@@ -102,12 +113,10 @@ async def process_invite_code_input(message: Message, state: FSMContext) -> None
 
     invite_code: str = message.text.strip().upper()
 
-    # Проверяем формат кода (6 символов, буквы/цифры)
     if len(invite_code) != 6 or not all(c.isalnum() for c in invite_code):
         await message.answer("❌ Неверный формат кода! Код должен состоять из 6 букв/цифр.\nПопробуйте еще раз:")
         return
 
-    # Обрабатываем код
     success: bool = await process_invite_code(message, invite_code, state)
 
     if success:
@@ -124,7 +133,6 @@ async def process_invite_code(message: Message, invite_code: str, state: FSMCont
     success, partner_id, response = utils.accept_invite(db, invite_code, message.from_user.id)
 
     if success:
-        # Получаем информацию о собеседнике
         from database import User
         partner = db.query(User).filter(User.id == partner_id).first()
         partner_name: str = partner.full_name or "Собеседник"
@@ -135,7 +143,6 @@ async def process_invite_code(message: Message, invite_code: str, state: FSMCont
             f"Теперь вы можете обмениваться задачами!"
         )
 
-        # Уведомляем собеседника
         notification_text: str = f"✅ {user_name} подключился к вам!\n\nТеперь вы можете обмениваться задачами!"
         await send_notification(partner.telegram_id, notification_text)
 
@@ -164,7 +171,6 @@ async def unbind_partner(message: Message) -> None:
     partner = db.query(User).filter(User.id == user.partner_id).first()
     partner_name: str = partner.full_name or "Собеседник"
 
-    # Подтверждение
     await message.answer(
         f"⚠️ <b>Отвязать собеседника?</b>\n\n"
         f"Вы собираетесь отвязать {partner_name}\n\n"
@@ -196,18 +202,14 @@ async def confirm_unbind_partner(callback: CallbackQuery) -> None:
     partner_name: str = partner.full_name or "Собеседник"
     user_name: str = callback.from_user.full_name or "Пользователь"
 
-
     tasks_assigned: list[Task] = db.query(Task).filter(Task.assigned_by_id == user.id).all()
-
     tasks_received: list[Task] = db.query(Task).filter(Task.assigned_to_id == user.id).all()
 
-    # Удаляем все задачи
     for task in tasks_assigned:
         db.delete(task)
     for task in tasks_received:
         db.delete(task)
 
-    # СБРАСЫВАЕМ СТАТИСТИКУ (безопасно)
     try:
         user.tasks_created_count = 0
         user.tasks_completed_count = 0
@@ -222,14 +224,12 @@ async def confirm_unbind_partner(callback: CallbackQuery) -> None:
     except:
         pass
 
-
     user.partner_id = None
     if partner:
         partner.partner_id = None
 
     db.commit()
 
-    # Уведомляем собеседника
     if partner:
         notification_text: str = (
             f"⚠️ {user_name} отвязался от вас!\n\n"
@@ -238,14 +238,12 @@ async def confirm_unbind_partner(callback: CallbackQuery) -> None:
         )
         await send_notification(partner.telegram_id, notification_text)
 
-
     await callback.message.answer(
         f"🔗 Собеседник <b>{partner_name}</b> отвязан!\n"
         f"Все задачи удалены, статистика сброшена.",
         parse_mode="HTML"
     )
 
-    # Возвращаем в меню
     await callback.message.answer(
         "Выберите действие:",
         reply_markup=kb.get_main_menu_keyboard(has_partner=False)

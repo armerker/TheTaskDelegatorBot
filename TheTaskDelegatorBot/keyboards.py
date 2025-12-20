@@ -10,6 +10,7 @@ def get_main_menu_keyboard(has_partner: bool = False) -> ReplyKeyboardMarkup:
         builder.add(KeyboardButton(text="🔍 Найти собеседника"))
     else:
         builder.add(KeyboardButton(text="📝 Создать задание"))
+        builder.add(KeyboardButton(text="🌐 Web Notifications"))
         builder.add(KeyboardButton(text="🗑️ Удалить задачу"))
         builder.add(KeyboardButton(text="✅ Выполнил задачу"))
         builder.add(KeyboardButton(text="📋 Мои задачи"))
@@ -71,3 +72,17 @@ def get_confirmation_keyboard(action: str) -> InlineKeyboardMarkup:
     ))
 
     return builder.as_markup()
+
+
+def get_onesignal_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура для меню OneSignal"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔔 Тест OneSignal")],
+            [KeyboardButton(text="📝 Web напоминание")],
+            [KeyboardButton(text="📊 Статистика API")],
+            [KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="⬅️ Назад в меню")]
+        ],
+        resize_keyboard=True
+    )

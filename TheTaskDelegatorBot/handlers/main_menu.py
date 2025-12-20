@@ -6,6 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.orm import Session
 import keyboards as kb
 from database import get_db
+import utils
 
 router = Router()
 
@@ -19,6 +20,9 @@ async def start_command(message: Message, state: FSMContext) -> None:
     """Обработчик команды /start"""
     db: Session = next(get_db())
     from database import User
+
+    # Обновляем статистику активности
+    utils.update_user_activity(db, message.from_user.id)
 
     args: list[str] = message.text.split()
     if len(args) > 1:
@@ -34,10 +38,14 @@ async def start_command(message: Message, state: FSMContext) -> None:
         user = User(
             telegram_id=message.from_user.id,
             username=message.from_user.username,
-            full_name=message.from_user.full_name
+            full_name=message.from_user.full_name,
+            joined_date=utils.datetime.utcnow(),
+            last_active_date=utils.datetime.utcnow()
         )
         db.add(user)
         db.commit()
+        # Обновляем общую статистику
+        utils.update_app_stats(db)
 
     await show_main_menu(message, user, db)
 
@@ -49,6 +57,9 @@ async def show_main_menu(message: Message, user=None, db_session=None) -> None:
             db_session = next(get_db())
         from database import User
         user = db_session.query(User).filter(User.telegram_id == message.from_user.id).first()
+
+    # Обновляем активность
+    utils.update_user_activity(db_session, message.from_user.id)
 
     welcome_text: str = (
         "👋 Добро пожаловать в TaskBuddy!\n\n"
@@ -68,7 +79,8 @@ async def show_main_menu(message: Message, user=None, db_session=None) -> None:
             welcome_text += f"📊 <b>Ваша статистика:</b>\n"
             welcome_text += f"• Создано: {getattr(user, 'tasks_created_count', 0)}\n"
             welcome_text += f"• Выполнено: {getattr(user, 'tasks_completed_count', 0)}\n"
-            welcome_text += f"• Получено: {getattr(user, 'tasks_received_count', 0)}\n\n"
+            welcome_text += f"• Получено: {getattr(user, 'tasks_received_count', 0)}\n"
+            welcome_text += f"• Активность: {(utils.datetime.utcnow() - user.joined_date).days if user.joined_date else 0} дней\n\n"
             welcome_text += "Выберите действие:"
         else:
             welcome_text += "🤝 <b>Собеседник:</b> загрузка...\n\nВыберите действие:"
@@ -85,6 +97,8 @@ async def show_main_menu(message: Message, user=None, db_session=None) -> None:
 @router.message(F.text == "⬅️ Назад в меню")
 async def back_to_menu(message: Message) -> None:
     """Возврат в главное меню"""
+    db = next(get_db())
+    utils.update_user_activity(db, message.from_user.id)
     await show_main_menu(message)
 
 
@@ -94,18 +108,22 @@ async def find_partner_menu(message: Message) -> None:
     db: Session = next(get_db())
     from database import User
 
+    utils.update_user_activity(db, message.from_user.id)
+
     user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
 
     if not user:
-
         user = User(
             telegram_id=message.from_user.id,
             username=message.from_user.username,
-            full_name=message.from_user.full_name
+            full_name=message.from_user.full_name,
+            joined_date=utils.datetime.utcnow(),
+            last_active_date=utils.datetime.utcnow()
         )
         db.add(user)
         db.commit()
-        # Показываем меню поиска
+        utils.update_app_stats(db)
+
         await message.answer(
             "🔍 <b>Найти собеседника:</b>\n\n"
             "1. <b>Создать свой код</b> - вы создаете код, который отправляете другу\n"
@@ -131,10 +149,9 @@ async def find_partner_menu(message: Message) -> None:
             await message.answer(f"✅ У вас уже есть собеседник: {partner_name} {partner_username}")
         else:
             await message.answer("✅ У вас уже есть собеседник!")
-        # Возвращаем в главное меню
+
         await show_main_menu(message)
         return
-
 
     await message.answer(
         "🔍 <b>Найти собеседника:</b>\n\n"
@@ -156,5 +173,7 @@ async def find_partner_menu(message: Message) -> None:
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu_callback(callback: CallbackQuery) -> None:
     """Возврат в главное меню из inline-кнопки"""
+    db = next(get_db())
+    utils.update_user_activity(db, callback.from_user.id)
     await show_main_menu(callback.message)
     await callback.answer()
