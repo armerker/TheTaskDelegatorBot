@@ -5,73 +5,42 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ParseMode
 import config
 from database import init_db
+from handlers import main_router
 
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# 🔧 Глобальные переменные для доступа из других модулей
-bot_instance = None
-dp = None
 
-
-async def main() -> None:
-    global bot_instance, dp
-
-    print("🚀 Запуск бота TaskBuddy...")
-
-    # Проверяем зависимости
+async def main():
+    """Главная функция запуска бота"""
     try:
-        import requests
-        print("✅ requests установлен")
-    except ImportError:
-        print("❌ Библиотека 'requests' не установлена!")
-        print("Установите: pip install requests")
-        return
+        # Инициализация базы данных
+        init_db()
 
-    print("📊 Инициализация базы данных...")
-    init_db()
-    print("✅ База данных готова")
+        # Инициализация бота
+        bot = Bot(token=config.config.BOT_TOKEN, parse_mode=ParseMode.HTML)
 
-    try:
-        bot_instance = Bot(token=config.config.BOT_TOKEN, parse_mode=ParseMode.HTML)
-        print(f"✅ Бот создан. ID: {bot_instance.id}")
-    except Exception as e:
-        print(f"❌ Ошибка создания бота: {e}")
-        print(f"Проверьте токен в .env файле")
-        return
+        # Инициализация диспетчера
+        storage = MemoryStorage()
+        dp = Dispatcher(storage=storage)
 
-    dp = Dispatcher(storage=MemoryStorage())
-
-    # Импортируем главный роутер
-    try:
-        from handlers import main_router
         dp.include_router(main_router)
-        print("✅ Все роутеры подключены")
-    except ImportError as e:
-        print(f"❌ Ошибка импорта роутеров: {e}")
-        return
 
-    print("🌐 OneSignal API: ВКЛЮЧЕНО")
+        logger.info("✅ Бот запущен и готов к работе!")
+        logger.info("✅ База данных инициализирована")
+        logger.info("✅ Графики статистики активированы")
+        logger.info("✅ Доступные модули: статистика, задачи, уведомления, графики")
 
-    await bot_instance.delete_webhook(drop_pending_updates=True)
-    print("🤖 Бот запущен! Отправьте /start")
-    print("🔗 OneSignal App ID:", config.config.ONESIGNAL_APP_ID)
-    print("🔗 Бот ID:", bot_instance.id)
+        # Запуск бота
+        await dp.start_polling(bot)
 
-    await dp.start_polling(bot_instance)
-
-
-def get_bot():
-    """Получить экземпляр бота из любого места"""
-    return bot_instance
-
-
-def get_dispatcher():
-    """Получить диспетчер из любого места"""
-    return dp
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска бота: {e}")
+        raise
 
 
 if __name__ == "__main__":

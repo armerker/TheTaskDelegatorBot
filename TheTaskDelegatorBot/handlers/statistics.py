@@ -110,22 +110,18 @@ async def get_user_statistics(message: Message) -> None:
 
 async def show_general_stats(message: Message, db, user=None) -> None:
     """Показать общую статистику приложения"""
-    # ПРИНУДИТЕЛЬНО обновляем статистику перед показом
-    utils.update_app_stats(db)
-
-    # Получаем свежую статистику
+    # Получаем сводную статистику
     app_stats = utils.get_app_stats_summary(db)
 
     stats_text = f"📊 <b>ОБЩАЯ СТАТИСТИКА ПРИЛОЖЕНИЯ</b>\n\n"
 
-    # Проверяем реальное количество пользователей
-    real_users_count = db.query(User).count()
+    # Статистика пользователей
     stats_text += f"👥 <b>ПОЛЬЗОВАТЕЛИ:</b>\n"
-    stats_text += f"• Всего в базе: <b>{real_users_count}</b>\n"
-    stats_text += f"• В статистике: <b>{app_stats['total_users']}</b>\n"
+    stats_text += f"• Всего пользователей: <b>{app_stats['total_users']}</b>\n"
     stats_text += f"• Активных (7 дней): <b>{app_stats['active_users']}</b>\n"
     stats_text += f"• С собеседниками: <b>{app_stats['users_with_partner']}</b>\n"
     stats_text += f"• Парность: <b>{app_stats['partner_rate']:.1f}%</b>\n\n"
+
     # Статистика задач
     stats_text += f"📋 <b>ЗАДАЧИ:</b>\n"
     stats_text += f"• Всего создано: <b>{app_stats['total_tasks']}</b>\n"

@@ -1,8 +1,7 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, \
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, \
     InlineKeyboardMarkup
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.orm import Session
 import keyboards as kb
